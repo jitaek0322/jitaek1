@@ -376,6 +376,25 @@ textarea.inp{line-height:1.5}
 .fdots2{display:flex;justify-content:center;gap:5px;margin-top:8px}
 .fdots2 i{width:6px;height:6px;border-radius:3px;background:rgba(255,255,255,.15);transition:width .3s,background .3s;cursor:pointer}
 .fdots2 i.on{width:18px;background:var(--gold)}
+
+/* 연계 출타 */
+.segrow{background:#0a1b31;border:1px solid var(--line);border-radius:14px;padding:10px 10px 0;margin-bottom:10px}
+.seghd{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.seghd .inp{flex:1;min-height:42px;padding:9px 10px}
+.segno{width:24px;height:24px;border-radius:50%;background:rgba(214,175,72,.18);color:var(--gold2);font-size:12px;font-weight:700;display:grid;place-items:center;flex:none}
+.segrow label.f{margin-bottom:10px}
+.segline{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:14px}
+.grid2x2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid2x2 .stat{padding:12px}.grid2x2 .stat .v{font-size:20px}
+#view.anim .grid2x2>.stat{animation:rise .55s cubic-bezier(.2,.8,.2,1) both}
+.onrow{display:flex;align-items:center;gap:12px}
+.onico{font-size:30px;width:52px;height:52px;border-radius:14px;background:rgba(111,179,240,.12);display:grid;place-items:center}
+.onv{font-size:24px;font-weight:800;color:var(--sea2)}
+.onbar{position:relative;height:8px;border-radius:99px;background:rgba(255,255,255,.07);margin-top:14px}
+.onbar i{position:absolute;top:0;bottom:0;border-radius:99px;background:linear-gradient(90deg,var(--sea),var(--sea2))}
+.onbar span{position:absolute;top:-4px;width:2px;height:16px;background:var(--dim);border-radius:1px}
+.onbar span.t{background:var(--gold)}
+#view.anim .onbar i{transform-origin:left;animation:grow 1s .25s cubic-bezier(.2,.8,.2,1) both}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 </style>
 <script src="firebase-config.js"></script>
@@ -421,6 +440,7 @@ function merge(base, d) {
   out.pay = { ...base.pay, ...(d.pay || {}) };
   out.savings = { ...base.savings, ...(d.savings || {}) };
   out.notify = { ...base.notify, ...(d.notify || {}) };
+  out.overnight = { ...base.overnight, ...(d.overnight || {}) };
   out.fitness = { ...base.fitness, ...(d.fitness || {}), goals: { ...base.fitness.goals, ...(d.fitness?.goals || {}) } };
   if (!Array.isArray(out.fitness.records)) out.fitness.records = [];
   return out;
@@ -774,7 +794,7 @@ function viewHome() {
   ${!pushOn ? `<div class="banner"><span style="font-size:22px">🔔</span><div style="flex:1">매일 <b>18시</b>에 일정·D-day 알림을 받아보세요</div><button class="btn sm pri" data-go="more" data-sub="set">켜기</button></div>` : ''}
   <div class="grid">
     <div class="stat"><div class="k">다음 진급</div><div class="v gold">${np ? L.dLabel(np.d) : '최고 계급'}</div><div class="s">${np ? `${np.rank.name} · ${L.fmtDate(np.date)}` : r.name}</div></div>
-    <div class="stat"><div class="k">${nl?.ongoing ? '복귀까지' : '다음 출타'}</div><div class="v sea">${nl ? L.dLabel(nl.d) : '—'}</div><div class="s">${nl ? `${esc(nl.leave.kind)} · ${L.fmtDate(nl.leave.start)}` : '계획을 등록해보세요'}</div></div>
+    <div class="stat"><div class="k">${nl?.ongoing ? '복귀까지' : '다음 출타'}</div><div class="v sea">${nl ? L.dLabel(nl.d) : '—'}</div><div class="s">${nl ? `${esc(nl.leave.kind === '연계' ? '연계 ' + L.tripSpan(nl.leave) : nl.leave.kind === '휴가' ? L.segName(S, L.segsOf(nl.leave)[0]) : nl.leave.kind)} · ${L.fmtDate(nl.leave.start)}` : '계획을 등록해보세요'}</div></div>
     <div class="stat"><div class="k">이번 달 봉급</div><div class="v">${(pay.amount / 10000).toLocaleString()}<small style="font-size:14px">만원</small></div><div class="s">${pay.rank.name} 기본봉급</div></div>
     <div class="stat"><div class="k">남은 휴가</div><div class="v green">${leftLeave}<small style="font-size:14px">일</small></div><div class="s">${totalLeave ? `총 ${totalLeave}일 중` : '휴가 탭에서 일수 입력'}</div></div>
   </div>
@@ -1027,15 +1047,18 @@ function homeExtras() {
 function viewLeave2() {
   const ls = L.leaveSummary(S), ms = L.mileageSummary(S);
   const ym = today.slice(0, 7);
-  const outs = L.OUTING_KINDS.map((k) => ({ k, month: S.leaves.filter((l) => l.kind === k && l.start.slice(0, 7) === ym).length, all: S.leaves.filter((l) => l.kind === k).length }));
+  const allSegs = S.leaves.flatMap(L.segsOf);
+  const outs = ['정기외박', ...L.OUTING_KINDS].map((k) => ({ k, month: allSegs.filter((g) => g.kind === k && g.start.slice(0, 7) === ym).length, all: allSegs.filter((g) => g.kind === k).length }));
+  const no = L.nextOvernight(S, today);
   const up = S.leaves.filter((l) => l.end >= today).sort((a, b) => a.start.localeCompare(b.start));
   const past = S.leaves.filter((l) => l.end < today).sort((a, b) => b.start.localeCompare(a.start));
   const nameOf = (id) => S.leaveTypes.find((t) => t.id === id)?.name || '';
   const chipCls = (k) => (k === '휴가' ? 'g' : k === '면회외출' ? 'r' : k === '휴일외출' ? '' : 'n');
   const row = (l) => {
     const p = l.plan || {}, ck = p.checklist || [], done = ck.filter((c) => c.done).length;
-    return `<div class="item tap" data-plan="${l.id}"><span class="chip ${chipCls(l.kind)}">${esc(l.kind)}</span>
-    <div class="t"><b>${l.kind === '휴가' ? esc(nameOf(l.typeId)) + ' · ' + L.leaveDays(l) + '일' : '당일'}${l.memo ? ' · ' + esc(l.memo) : ''}</b>
+    const kindChip = l.kind === '연계' ? '<span class="chip g">연계</span>' : `<span class="chip ${chipCls(l.kind)}">${esc(l.kind === '휴가' ? L.segName(S, L.segsOf(l)[0]) : l.kind)}</span>`;
+    return `<div class="item tap" data-plan="${l.id}">${kindChip}
+    <div class="t"><b>${esc(L.tripLabel(S, l))}${l.kind === '연계' ? ` · ${L.tripSpan(l)}` : ''}${l.memo ? ' · ' + esc(l.memo) : ''}</b>
     <small>${L.fmtDate(l.start)}${l.end !== l.start ? ' ~ ' + L.fmtDate(l.end) : ''}${l.start > today ? ` · ${L.dLabel(L.diffDays(today, l.start))}` : l.end >= today ? ' · 출타 중' : ''}${ck.length ? ` · ✔ ${done}/${ck.length}` : ''}${p.spend ? ` · ${L.won(p.spend)}` : ''}</small></div>
     <span class="chev">›</span></div>`;
   };
@@ -1047,9 +1070,16 @@ function viewLeave2() {
       ${t.earned ? `<div class="note" style="margin-top:6px">부여 ${t.base}일 + 주말근무 마일리지 ${t.earned}일 (다음 1일까지 ${n1(ms.toNext)}점)</div>` : ''}</div>`).join('')}
     ${ls.every((t) => !t.total) ? '<div class="note">부여받은 휴가 일수를 "일수 편집"에서 입력하세요. 위로휴가는 주말근무 마일리지 10점마다 1일씩 자동으로 더해져요.</div>' : ''}
   </div>
-  <h2>외출 횟수</h2>
-  <div class="grid3">${outs.map((o) => `<div class="stat"><div class="k">${o.k}</div><div class="v">${o.month}<small style="font-size:13px">회</small></div><div class="s">이번 달 · 누적 ${o.all}회</div></div>`).join('')}</div>
-  <button class="btn pri full" style="margin-top:12px" data-add="leave">+ 휴가 · 외출 등록</button>
+  <h2>정기외박 <span class="hint">${S.overnight?.cycleWeeks || 6}주 주기 · ${S.overnight?.nights ?? 2}박${(S.overnight?.nights ?? 2) + 1}일</span> <button class="link" data-edit="etc">주기 설정</button></h2>
+  <div class="card on-card">${!no ? '<div class="empty" style="padding:4px 0">정기외박을 한 번 기록하면 다음 외박 시기를 계산해드려요</div>'
+    : no.planned ? `<div class="onrow"><span class="onico">🌙</span><div style="flex:1"><div class="sub">${no.ongoing ? '외박 중' : '다음 정기외박'}</div><b class="onv">${no.ongoing ? '복귀 ' + L.dLabel(L.diffDays(today, no.seg.end)) : L.dLabel(no.d)}</b><div class="note" style="margin:2px 0 0">${L.fmtDate(no.seg.start)} ~ ${L.fmtDate(no.seg.end)}${no.seg.trip.kind === '연계' ? ` · ${esc(L.tripLabel(S, no.seg.trip))}` : ''}</div></div></div>`
+    : `<div class="onrow"><span class="onico">🌙</span><div style="flex:1"><div class="sub">다음 정기외박 예정 (${no.cfg.cycleWeeks}주차)</div><b class="onv">${L.dLabel(no.d)}</b><div class="note" style="margin:2px 0 0">${L.fmtDate(no.target)} 전후 · 마지막 외박 후 ${no.weeksSince}주째</div></div></div>
+      <div class="onbar"><i style="left:0;width:${Math.min(100, (L.diffDays(no.last, today) / (no.cfg.maxWeeks * 7)) * 100)}%"></i><span style="left:${(no.cfg.minWeeks / no.cfg.maxWeeks) * 100}%"></span><span style="left:${(no.cfg.cycleWeeks / no.cfg.maxWeeks) * 100}%" class="t"></span></div>
+      <div class="vlab" style="margin-top:4px"><span>${L.fmtDate(no.last, false).slice(3)} 외박</span><span>${no.cfg.minWeeks}주 ${L.fmtDate(no.windowStart, false).slice(3)}</span><span>${no.cfg.maxWeeks}주 ${L.fmtDate(no.windowEnd, false).slice(3)}</span></div>`}
+  </div>
+  <h2>외박 · 외출 횟수</h2>
+  <div class="grid2x2">${outs.map((o) => `<div class="stat"><div class="k">${o.k}</div><div class="v">${o.month}<small style="font-size:13px">회</small></div><div class="s">이번 달 · 누적 ${o.all}회</div></div>`).join('')}</div>
+  <button class="btn pri full" style="margin-top:12px" data-add="leave">+ 휴가 · 외박 · 외출 등록</button>
   <h2>예정 <span class="hint">눌러서 출타 플래너 열기</span></h2>
   <div class="card"><div class="list">${up.length ? up.map(row).join('') : empty('예정된 출타가 없어요')}</div></div>
   <h2>지난 기록</h2>
@@ -1245,7 +1275,7 @@ function viewReport() {
       ${T('⚖️', '양호 / 과실', `+${n1(r.merit.good)} / −${n1(r.merit.bad)}`, `과실 ${r.merit.badN}회`)}
       ${T('🛠️', '주말근무', `${n1(r.weekend.hours)}시간`, `위로 +${n1(r.weekend.comfort)}점`)}
       ${T('✅', '목표 체크', `${r.goalsDone}회`, '')}
-      ${T('🧳', '출타', `휴가 ${r.leaveDays}일`, `외출 ${r.outings}회`)}
+      ${T('🧳', '출타', `휴가 ${r.leaveDays}일`, `외박 ${r.overnights}회 · 외출 ${r.outings}회`)}
       ${T('💪', '체력', r.fit ? `${r.fit.pushup || '—'} · ${r.fit.situp || '—'}` : '—', r.fit ? `3km ${L.fmtRun(r.fit.run)}` : '측정 없음')}
     </div>
   </section>
@@ -1276,26 +1306,34 @@ const lastWeekendDay = () => { let d = today; for (let i = 0; i < 7; i++) { cons
 const LEAVE_CHECK = ['출타 신고 · 승인 확인', '교통편 예매', '휴대폰 충전기', '사복 · 신분증', '복귀 시간 확인', '복귀 선물 · 간식'];
 
 Object.assign(SHEETS, {
-  leave() {
-    openSheet(`<h3>휴가 · 외출 등록</h3><form>
-      ${field('종류', `<select class="inp" name="kind" id="lkind"><option>휴가</option>${L.OUTING_KINDS.map((k) => `<option>${k}</option>`).join('')}</select>`)}
-      <div id="ltype">${field('휴가 구분', `<select class="inp" name="typeId">${S.leaveTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>`)}</div>
-      <div class="row">${field('출발', inp('start', today, 'date', 'required'))}<div id="lend">${field('복귀', inp('end', today, 'date'))}</div></div>
-      <div id="ldays">${field('차감 일수 (비우면 기간 전체)', inp('days', '', 'number', 'min="0" inputmode="numeric" placeholder="자동 계산"'))}</div>
-      ${field('메모 (선택)', inp('memo', '', 'text', 'placeholder="예: 1차 정기휴가, 부모님 면회"'))}${actions('등록')}</form>`,
+  leave(editId) {
+    const ed = editId && S.leaves.find((x) => x.id === editId);
+    const segs = ed ? L.segsOf(ed).map((g) => ({ ...g })) : [{ kind: '휴가', typeId: 'annual', start: today, end: today }];
+    openSheet(`<h3>${ed ? '출타 구간 수정' : '휴가 · 외박 · 외출 등록'}</h3>
+      <div class="note" style="margin:-8px 0 12px">정기외박 + 연가처럼 이어서 쓰면 구간을 추가하세요. 구간마다 그 종류에서 따로 차감돼요.</div>
+      ${ed ? '' : `<div class="chips" style="margin-bottom:10px"><button type="button" class="btn sm ghost" data-preset="on+annual">🌙 외박 + 연가</button><button type="button" class="btn sm ghost" data-preset="annual+reward">🧳 연가 + 포상</button><button type="button" class="btn sm ghost" data-preset="annual+comfort">🧳 연가 + 위로</button></div>`}
+      <form id="tripf"><div id="segs"></div>
+      <button type="button" class="btn ghost full" data-segadd style="margin:2px 0 12px">+ 구간 추가 (이어서)</button>
+      <div class="rule" id="tripsum" style="margin:0 0 12px"></div>
+      ${field('메모 (선택)', inp('memo', ed?.memo || '', 'text', 'placeholder="예: 1차 정기휴가"'))}${actions(ed ? '저장' : '등록')}</form>`,
     (f) => {
-      const out = L.isOuting(f.kind);
-      if (!out && f.end < f.start) { toast('복귀일이 출발일보다 빨라요'); return false; }
-      const l = { id: uid(), kind: f.kind, typeId: out ? '' : f.typeId, start: f.start, end: out ? f.start : f.end || f.start, days: !out && f.days ? Number(f.days) : undefined, memo: f.memo.trim(), plan: { checklist: out ? [] : LEAVE_CHECK.map((t) => ({ t, done: false })) } };
-      S.leaves.push(l); save(); toast(`${f.kind}을 등록했어요`);
+      const rows = readSegs(); if (!rows.length) { toast('구간을 하나 이상 넣어주세요'); return false; }
+      if (rows.some((g) => g.end < g.start)) { toast('복귀일이 출발일보다 빠른 구간이 있어요'); return false; }
+      const sorted = [...rows].sort((a, b) => a.start.localeCompare(b.start));
+      for (let k = 1; k < sorted.length; k++) if (sorted[k].start <= sorted[k - 1].end && !L.isOuting(sorted[k].kind) && !confirm('겹치는 날짜가 있어요. 그래도 저장할까요?')) return false;
+      const base = ed || { id: uid(), plan: { checklist: rows.every((g) => L.isOuting(g.kind)) ? [] : LEAVE_CHECK.map((t) => ({ t, done: false })) } };
+      base.segments = rows; base.memo = f.memo.trim(); L.normalizeTrip(base);
+      if (!ed) S.leaves.push(base);
+      save(); toast(ed ? '수정했어요' : `${L.tripLabel(S, base)} 등록!`);
     });
-    const k = $('#lkind'); k.onchange = () => { const o = k.value !== '휴가'; ['#ltype', '#lend', '#ldays'].forEach((s) => ($(s).style.display = o ? 'none' : '')); };
+    SEGS = segs; drawSegs();
   },
   plan(id) {
     const l = S.leaves.find((x) => x.id === id); if (!l) return; l.plan ||= { checklist: [] };
-    const p = l.plan, nameOf = S.leaveTypes.find((t) => t.id === l.typeId)?.name;
-    openSheet(`<h3>🧳 ${esc(l.kind === '휴가' ? nameOf || '휴가' : l.kind)} 플래너</h3>
-      <div class="sub" style="margin:-8px 0 14px">${L.fmtDate(l.start)}${l.end !== l.start ? ' ~ ' + L.fmtDate(l.end) : ''}${l.start > today ? ` · ${L.dLabel(L.diffDays(today, l.start))}` : ''}</div>
+    const p = l.plan;
+    openSheet(`<h3>🧳 출타 플래너</h3>
+      <div class="sub" style="margin:-8px 0 8px">${L.fmtDate(l.start)}${l.end !== l.start ? ' ~ ' + L.fmtDate(l.end) : ''} · ${L.tripSpan(l)}${l.start > today ? ` · ${L.dLabel(L.diffDays(today, l.start))}` : ''}</div>
+      <div class="segline">${L.segsOf(l).map((g) => `<span class="chip ${g.kind === '휴가' ? 'g' : g.kind === '정기외박' ? '' : 'n'}">${esc(L.segName(S, g))} ${L.fmtDate(g.start, false).slice(3)}${g.end !== g.start ? '~' + L.fmtDate(g.end, false).slice(3) : ''}</span>`).join('<span class="sub">+</span>')}<button type="button" class="link" data-trip-edit="${l.id}" style="margin-left:auto;font-size:13px">구간 수정</button></div>
       <form>
       ${field('교통편', inp('transport', p.transport || '', 'text', 'placeholder="예: 14:10 KTX 부산→서울"'))}
       ${field('만날 사람', inp('people', p.people || '', 'text', 'placeholder="예: 부모님, 친구 민수"'))}
@@ -1308,7 +1346,7 @@ Object.assign(SHEETS, {
       <button type="button" class="btn ghost full" style="margin-top:10px;color:var(--red)" data-del="leaves:${l.id}">이 출타 기록 삭제</button></form>`,
     (f) => {
       Object.assign(p, { transport: f.transport.trim(), people: f.people.trim(), spend: Number(f.spend) || 0 }); l.memo = f.memo.trim();
-      if (f.toBook && p.spend && !p.booked) { S.expenses.push({ id: uid(), date: l.start, cat: S.expenseCats.includes('외출') ? '외출' : S.expenseCats[0], amount: p.spend, memo: `${l.kind} ${l.memo || ''}`.trim() }); p.booked = true; }
+      if (f.toBook && p.spend && !p.booked) { S.expenses.push({ id: uid(), date: l.start, cat: S.expenseCats.includes('외출') ? '외출' : S.expenseCats[0], amount: p.spend, memo: `${L.tripLabel(S, l)} ${l.memo || ''}`.trim() }); p.booked = true; }
       save(); toast('저장했어요');
     });
     $('#sheetBody').dataset.leave = id;
@@ -1392,11 +1430,52 @@ Object.assign(SHEETS, {
   etc() {
     openSheet(`<h3>기준 설정</h3><form>
       <div class="row">${field('봉급일 (매월)', inp('payday', S.payday, 'number', 'min="1" max="28" inputmode="numeric"'))}${field('위로휴가 1일 = 마일리지', inp('per', S.mileagePerDay, 'number', 'min="1" inputmode="numeric"'))}</div>
+      <label class="f"><span>정기외박 주기</span></label>
+      <div class="row">${field('기본 (주)', inp('onc', S.overnight?.cycleWeeks ?? 6, 'number', 'min="1" inputmode="numeric"'))}${field('빠르면 (주)', inp('onmin', S.overnight?.minWeeks ?? 5, 'number', 'min="1" inputmode="numeric"'))}${field('늦으면 (주)', inp('onmax', S.overnight?.maxWeeks ?? 7, 'number', 'min="1" inputmode="numeric"'))}${field('박 수', inp('onn', S.overnight?.nights ?? 2, 'number', 'min="1" inputmode="numeric"'))}</div>
       ${field('가계부 분류 (쉼표로 구분)', inp('cats', S.expenseCats.join(', ')))}
       ${field('추가 휴일 (월급날 계산용, 쉼표로 구분)', `<textarea class="inp" name="hol" rows="2" placeholder="예: 2027-02-08, 2027-09-15">${esc((S.holidays || []).join(', '))}</textarea>`)}
       <div class="note" style="margin-top:-4px">주말과 신정·삼일절·어린이날·현충일·광복절·개천절·한글날·성탄절은 자동으로 빠져요. 설·추석·대체공휴일만 넣으면 돼요.</div>${actions()}</form>`,
-    (f) => { S.payday = Math.min(28, Math.max(1, Number(f.payday) || 10)); S.mileagePerDay = Math.max(1, Number(f.per) || 10); S.holidays = [...new Set(f.hol.split(/[,\s]+/).map((x) => x.trim()).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort(); const c = f.cats.split(',').map((x) => x.trim()).filter(Boolean); if (c.length) S.expenseCats = [...new Set(c)]; save(); });
+    (f) => { S.payday = Math.min(28, Math.max(1, Number(f.payday) || 10)); S.mileagePerDay = Math.max(1, Number(f.per) || 10); { const c = Math.max(1, +f.onc || 6), mn = Math.max(1, +f.onmin || 5), mx = Math.max(1, +f.onmax || 7); S.overnight = { cycleWeeks: c, minWeeks: Math.min(mn, c), maxWeeks: Math.max(mx, c), nights: Math.max(1, +f.onn || 2) }; } S.holidays = [...new Set(f.hol.split(/[,\s]+/).map((x) => x.trim()).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort(); const c = f.cats.split(',').map((x) => x.trim()).filter(Boolean); if (c.length) S.expenseCats = [...new Set(c)]; save(); });
   },
+});
+/* ---- 출타 구간 편집기 ---- */
+let SEGS = [];
+const SEG_OPTS = () => [...S.leaveTypes.map((t) => [`v:${t.id}`, t.name]), ['정기외박', '정기외박'], ...L.OUTING_KINDS.map((k) => [k, k])];
+const segVal = (g) => (g.kind === '휴가' ? `v:${g.typeId}` : g.kind);
+function drawSegs() {
+  const box = $('#segs'); if (!box) return;
+  box.innerHTML = SEGS.map((g, i) => {
+    const out = L.isOuting(g.kind);
+    return `<div class="segrow" data-si="${i}"><div class="seghd"><span class="segno">${i + 1}</span>
+      <select class="inp segk" data-segk-i="${i}">${SEG_OPTS().map(([v, n]) => `<option value="${v}" ${v === segVal(g) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+      ${SEGS.length > 1 ? `<button type="button" class="x" data-segdel="${i}" aria-label="구간 삭제">×</button>` : ''}</div>
+      <div class="row">${field(out ? '날짜' : '시작', `<input class="inp" type="date" data-segs="${i}" value="${g.start}">`)}${out ? '' : field('끝', `<input class="inp" type="date" data-sege="${i}" value="${g.end}">`)}</div></div>`;
+  }).join('');
+  drawTripSum();
+}
+function readSegs() { return SEGS.map((g) => (L.isOuting(g.kind) ? { ...g, end: g.start } : { ...g })); }
+function drawTripSum() {
+  const el = $('#tripsum'); if (!el) return;
+  const rows = readSegs(); if (!rows.length) { el.innerHTML = ''; return; }
+  const t = L.normalizeTrip({ segments: rows.map((g) => ({ ...g })) });
+  const ded = {}; let on = 0, outs = 0;
+  for (const g of rows) { if (g.kind === '휴가') ded[L.segName(S, g)] = (ded[L.segName(S, g)] || 0) + L.segDays(g); else if (g.kind === '정기외박') on++; else outs++; }
+  el.innerHTML = `<b>${L.fmtDate(t.start)}${t.end !== t.start ? ' ~ ' + L.fmtDate(t.end) : ''} · ${L.tripSpan(t)}</b>
+    <div>${Object.entries(ded).map(([n, v]) => `<span class="chip g">${esc(n)} −${v}일</span>`).join(' ')} ${on ? `<span class="chip">외박 ${on}회</span>` : ''} ${outs ? `<span class="chip n">외출 ${outs}회</span>` : ''}</div>`;
+}
+function addSeg(kindVal) {
+  const last = SEGS[SEGS.length - 1], start = last ? L.addDays(L.isOuting(last.kind) ? last.start : last.end, 1) : today;
+  const g = { start, end: start }; setSegKind(g, kindVal || 'v:annual'); SEGS.push(g); drawSegs();
+}
+function setSegKind(g, v) {
+  if (v.startsWith('v:')) { g.kind = '휴가'; g.typeId = v.slice(2); if (g.end < g.start) g.end = g.start; }
+  else { g.kind = v; g.typeId = ''; if (v === '정기외박') g.end = L.addDays(g.start, S.overnight?.nights ?? 2); if (L.isOuting(v)) g.end = g.start; }
+}
+document.addEventListener('change', (e) => {
+  const el = e.target, ds = el.dataset;
+  if (ds.segkI != null) { setSegKind(SEGS[+ds.segkI], el.value); drawSegs(); }
+  else if (ds.segs != null) { const g = SEGS[+ds.segs]; const len = L.diffDays(g.start, g.end); g.start = el.value; g.end = L.addDays(el.value, Math.max(0, len)); drawSegs(); }
+  else if (ds.sege != null) { SEGS[+ds.sege].end = el.value; drawTripSum(); }
 });
 function pckRow(c, i) { return `<div class="item" style="padding:9px 2px"><button type="button" class="check ${c.done ? 'on' : ''}" data-pchk="${i}" aria-label="체크"></button><div class="t"><b style="${c.done ? 'text-decoration:line-through;color:var(--sub)' : ''}">${esc(c.t)}</b></div><button type="button" class="x" data-pdel="${i}" aria-label="삭제">×</button></div>`; }
 
@@ -1423,6 +1502,14 @@ function handleNew(t, d) {
   }
   if (d.mnav) { const [k, n] = d.mnav.split(':'); MON[k] = L.addMonths(`${MON[k]}-01`, Number(n)).slice(0, 7); render(); return true; }
   if (d.plan) { SHEETS.plan(d.plan); return true; }
+  if (d.preset) {
+    const [a, b] = d.preset.split('+'); const st = today;
+    SEGS = []; const first = { start: st, end: st }; setSegKind(first, a === 'on' ? '정기외박' : `v:${a}`); if (first.kind === '휴가') first.end = L.addDays(st, 2); SEGS.push(first);
+    addSeg(`v:${b}`); const sec = SEGS[1]; if (sec.kind === '휴가') sec.end = L.addDays(sec.start, b === 'annual' ? 2 : 1); drawSegs(); return true;
+  }
+  if ('segadd' in d) { addSeg('v:annual'); return true; }
+  if (d.segdel != null) { SEGS.splice(+d.segdel, 1); drawSegs(); return true; }
+  if (d.tripEdit) { closeSheet(); setTimeout(() => SHEETS.leave(d.tripEdit), 260); return true; }
   if (d.mood) {
     const v = Number(d.mood); S.diary[today] = { ...(S.diary[today] || {}), mood: v };
     const inForm = t.closest('form[data-form="diary"]');
