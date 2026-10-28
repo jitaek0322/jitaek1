@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0B1F3A">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -23,6 +23,10 @@
   --r:18px; --safe-b:env(safe-area-inset-bottom); --safe-t:env(safe-area-inset-top);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+button,a,label,.tap,.cal .d{touch-action:manipulation}
+/* iOS는 16px보다 작은 입력칸을 누르면 화면을 확대하므로 16px 고정 */
+input,select,textarea,.inp{font-size:16px!important}
 html,body,button,input,select,textarea,table{font-family:"Pretendard Variable",Pretendard,-apple-system,system-ui,sans-serif}
 html,body{margin:0;background:var(--bg);color:var(--text);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
 body{min-height:100dvh;background:
@@ -448,6 +452,9 @@ function setSync(on, txt) { $('#syncDot').className = 'dot' + (on ? ' on' : '');
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('./firebase-messaging-sw.js', { scope: './' }).catch(() => {});
 }
+// 확대·축소 막기 (iOS Safari는 viewport 설정을 무시하는 경우가 있어 제스처도 차단)
+['gesturestart', 'gesturechange', 'gestureend'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
 const standalone = () => window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 
 /* ============ 공통 UI ============ */
