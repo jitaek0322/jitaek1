@@ -1,7 +1,7 @@
 // 서비스 워커: 오프라인 캐시 + 앱이 꺼져 있을 때 푸시 알림 표시
 importScripts('./firebase-config.js');
 
-const CACHE = 'navy-log-v4';
+const CACHE = 'navy-log-v6';
 const SHELL = ['./', './index.html', './logic.js', './firebase-config.js', './manifest.webmanifest',
   './fonts/PretendardVariable.woff2', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
