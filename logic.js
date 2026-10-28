@@ -23,6 +23,7 @@ export const NOTIFY_ITEMS = [
   { key: 'diary', label: '일기 리마인드', desc: '오늘 일기를 안 썼을 때' },
   { key: 'merit', label: '과실 경고', desc: '최근 2개월 과실 2회 이상이 된 날 · 줄어든 날' },
   { key: 'report', label: '월간 리포트', desc: '매월 1일 지난달 요약' },
+  { key: 'payday', label: '월급날', desc: '월급날 전날 · 당일 (주말이면 금요일로 당겨서)' },
 ];
 
 export function defaultData() {
@@ -50,10 +51,11 @@ export function defaultData() {
     leaves: [], // {id, typeId, kind:'휴가'|'평일외출'|'휴일외출'|'면회외출', start, end, days, memo, plan:{transport, people, checklist:[{t,done}], spend}}
     events: [], // {id, date, time, title, cat, memo, remind:'day1'|'day0'|'both'|'none'}
     goals: [], // {id, title, emoji, logs:{'YYYY-MM-DD':true}}
-    notify: { daily: true, events: true, promotion: true, leave: true, goals: true, savings: true, milestone: true, anniv: true, diary: false, merit: true, report: true },
+    notify: { daily: true, events: true, promotion: true, leave: true, goals: true, savings: true, milestone: true, anniv: true, diary: false, merit: true, report: true, payday: true },
     widgetKey: '',
     widgetTheme: 'forklift',
-    payday: 10,            // 봉급일 (남은 월급날 계산용)
+    payday: 10,            // 봉급일 — 주말·공휴일이면 직전 평일
+    holidays: [],          // 추가 휴일 'YYYY-MM-DD' (설·추석·대체공휴일 등)
     mileagePerDay: 10,     // 위로 마일리지 n점 = 위로휴가 1일
     drives: [],            // {id, date, vehicle, name, start, end, km, cargo, memo}
     fitness: { records: [], goals: { pushup: 0, situp: 0, run: 0 } }, // records: {id, date, pushup, situp, run(sec)}
@@ -198,7 +200,8 @@ export function buildNotifications(data, today, nowTime = '18:00') {
   const tomorrow = addDays(today, 1);
 
   if (on.daily && !sv.done) {
-    out.push({ key: 'daily', title: `⚓ 전역 ${dLabel(sv.left)}`, body: `${r.name} · 복무율 ${sv.pct.toFixed(1)}% · ${sv.served}일째 복무 중` });
+    const v = { left: sv.left, pct: sv.pct.toFixed(1), served: sv.served, rank: r.name, meals: sv.left * 3, weeks: Math.ceil(sv.left / 7) };
+    out.push({ key: 'daily', title: pick(FUN.dailyTitle, today, 'dt')(v), body: pick(FUN.dailyBody, today, 'db')(v) });
   }
 
   if (on.milestone) {
@@ -423,21 +426,40 @@ export function upcomingAnnivs(data, today) {
 // ---------- 남은 기간 환산 ----------
 export function remainingFun(data, today) {
   const end = data.profile.discharge;
+  const sv = service(data, today);
   const left = Math.max(0, diffDays(today, end));
   let weekends = 0, paydays = 0;
   for (let i = 1; i < left; i++) { const d = addDays(today, i); if (new Date(Date.UTC(...d.split('-').map((v, j) => (j === 1 ? v - 1 : +v)))).getUTCDay() === 6) weekends++; }
-  const pd = String(data.payday || 10).padStart(2, '0');
-  for (let ym = ymOf(today); ym <= ymOf(end); ym = addMonths(`${ym}-01`, 1).slice(0, 7)) { const d = `${ym}-${pd}`; if (d > today && d <= end) paydays++; }
-  const promos = RANKS.slice(1).filter((r) => data.profile.promo?.[r.key] > today).length;
+  for (let ym = ymOf(today); ym <= ymOf(end); ym = addMonths(`${ym}-01`, 1).slice(0, 7)) { const d = paydayDate(data, ym); if (d > today && d <= end) paydays++; }
+  const promos = RANKS.slice(1).filter((r) => data.profile.promo?.[r.key] > today);
+  const nextPro = promos[0];
+  // 명절 (설·추석 당일) — 전역 전까지 남은 횟수
+  const holidays = (data.bigHolidays || BIG_HOLIDAYS).filter((h) => h.date > today && h.date <= end);
+  const np = nextPayday(data, today);
+  const p = sv.pct / 100;
+  // 군생활을 하루 24시간으로 치면
+  const mins = Math.floor(p * 1440), hh = Math.floor(mins / 60), mm = mins % 60;
+  const clock = `${hh < 12 ? '오전' : '오후'} ${hh % 12 === 0 ? 12 : hh % 12}:${String(mm).padStart(2, '0')}`;
+  const clockMsg = hh < 7 ? '아직 꿈나라… 기상나팔도 안 울렸어요' : hh < 12 ? '오전 일과 중! 점심까지 버텨요' : hh < 13 ? '점심시간! 딱 반 왔어요' : hh < 18 ? '오후 일과 중, 곧 저녁이에요' : hh < 22 ? '일과 끝! 개인정비 시간' : '곧 취침… 전역이 코앞!';
+  const movie = Math.floor(p * 120), soccer = Math.floor(p * 90);
   return [
-    { k: 'meals', e: '🍚', v: left * 3, u: '끼', n: '남은 짬밥' },
-    { k: 'weekends', e: '🏖️', v: weekends, u: '번', n: '남은 주말' },
-    { k: 'paydays', e: '💵', v: paydays, u: '번', n: '남은 월급날' },
-    { k: 'promos', e: '🎖️', v: promos, u: '번', n: '남은 진급' },
-    { k: 'weeks', e: '📆', v: Math.ceil(left / 7), u: '주', n: '남은 주' },
-    { k: 'hours', e: '⏳', v: left * 24, u: '시간', n: '남은 시간' },
+    { k: 'payday', e: '💵', v: np.d === 0 ? '오늘!' : `D-${np.d}`, n: '다음 월급날', s: `${fmtDate(np.date)}${np.moved ? ' · 주말·휴일이라 당겨짐' : ''} · 남은 월급날 ${paydays}번`, gold: true },
+    { k: 'meals', e: '🍚', v: left * 3, u: '끼', n: '남은 짬밥', s: `지금까지 ${(sv.served * 3).toLocaleString()}끼 먹었어요` },
+    { k: 'clock', e: '🕰️', v: clock, n: '군생활을 하루로 치면', s: clockMsg, viz: 'clock', p },
+    { k: 'weekends', e: '🏖️', v: weekends, u: '번', n: '남은 주말', s: `남은 일요일 밤 우울함도 ${weekends}번` },
+    { k: 'movie', e: '🎬', v: `${movie}분`, n: '2시간짜리 영화라면', s: movie < 60 ? '아직 전개 중… 반전은 지금부터!' : movie < 100 ? '클라이맥스 진입! 팝콘 아껴 먹어요' : '엔딩 크레딧 올라가는 중 🎞️' },
+    { k: 'soccer', e: '⚽', v: soccer < 45 ? `전반 ${soccer}분` : `후반 ${soccer - 45}분`, n: '축구 경기라면', s: soccer < 45 ? '하프타임까지 조금만!' : soccer < 80 ? '후반전, 체력 안배 중' : '추가시간! 휘슬 직전' },
+    { k: 'promos', e: '🎖️', v: promos.length, u: '번', n: '남은 진급', s: nextPro ? `다음은 ${nextPro.name} · ${fmtDate(data.profile.promo[nextPro.key])}` : '최고 계급 달성! 👑' },
+    { k: 'roll', e: '🌙', v: left, u: '번', n: '남은 일석점호', s: '기상나팔도 딱 그만큼만 더 들으면 돼요' },
+    { k: 'holidays', e: '🧧', v: holidays.length, u: '번', n: '부대에서 맞을 수도 있는 명절', s: holidays.length ? holidays.map((h) => `${h.name} ${fmtDate(h.date, false).slice(3)}`).join(' · ') : '명절은 이제 전부 집에서!' },
+    { k: 'heart', e: '💓', v: left * 1440 * 70, u: '번', n: '남은 심장 박동 (분당 70회)', s: '두근두근… 전역 생각만 해도 빨라지는 중' },
+    { k: 'weeks', e: '📆', v: Math.ceil(left / 7), u: '주', n: '남은 주', s: `시간으로는 ${(left * 24).toLocaleString()}시간` },
   ];
 }
+// 설·추석 당일 (2026~2027)
+export const BIG_HOLIDAYS = [
+  { name: '추석', date: '2026-09-25' }, { name: '설날', date: '2027-02-07' }, { name: '추석', date: '2027-09-15' },
+];
 
 // ---------- 업적 배지 ----------
 export function badges(data, today) {
@@ -518,6 +540,13 @@ function extraNotifications(data, today, nowTime, out) {
     const r = monthReport(data, prevYM(ymOf(today)), today);
     out.push({ key: 'report', title: `📊 ${Number(r.ym.slice(5))}월 리포트가 나왔어요`, body: `운행 ${r.drives.hours}시간 · 지출 ${won(r.money.spent)} · 양호 ${r.merit.good}점${r.mood ? ` · 평균 기분 ${r.mood}` : ''}` });
   }
+  if (on.payday) {
+    const pdThis = paydayDate(data, ymOf(today)), pdNext = paydayDate(data, addMonths(`${ymOf(today)}-01`, 1).slice(0, 7));
+    const amt = won(data.pay[rankOn(data, today).key] || 0);
+    const moved = (d) => d.slice(8) !== String(data.payday || 10).padStart(2, '0');
+    if (pdThis === today && today <= data.profile.discharge) out.push({ key: 'payday', title: pick(FUN.paydayTitle, today, 'pt'), body: `${amt} 입금 예정!${moved(today) ? ' (주말이라 금요일에 들어와요)' : ''} ${pick(FUN.paydayBody, today, 'pb')}` });
+    for (const pdd of [pdThis, pdNext]) if (diffDays(today, pdd) === 1 && pdd <= data.profile.discharge) out.push({ key: 'payday', title: pick(FUN.paydayEveTitle, today, 'pe'), body: `내일 ${amt} 들어와요${moved(pdd) ? ' (주말이라 하루 일찍!)' : ''}. ${pick(FUN.paydayEveBody, today, 'pv')}` });
+  }
   if (on.merit) {
     const fw = faultWindow(data, today);
     const last = fw.list[fw.list.length - 1];
@@ -525,5 +554,64 @@ function extraNotifications(data, today, nowTime, out) {
     const prevWin = faultWindow(data, addDays(today, -1));
     if (prevWin.count > fw.count && fw.count < prevWin.count) out.push({ key: 'merit', title: '🕊️ 과실 카운트가 줄었어요', body: `최근 2개월 과실 ${fw.count}회` });
   }
+  return out;
+}
+
+// ---------- 월급날 (주말·공휴일이면 직전 평일) ----------
+// 날짜가 고정된 공휴일만 기본 반영 (설·추석 등 음력 공휴일은 설정의 '추가 휴일'에 넣으면 반영)
+export const FIXED_HOLIDAYS = ['01-01', '03-01', '05-05', '06-06', '08-15', '10-03', '10-09', '12-25'];
+export function isOffDay(data, d) {
+  const dow = new Date(Date.UTC(...d.split('-').map((v, i) => (i === 1 ? v - 1 : +v)))).getUTCDay();
+  return dow === 0 || dow === 6 || FIXED_HOLIDAYS.includes(d.slice(5)) || (data.holidays || []).includes(d);
+}
+export function paydayDate(data, ym) {
+  const day = Math.min(daysInMonth(ym), Math.max(1, Number(data.payday) || 10));
+  let d = `${ym}-${String(day).padStart(2, '0')}`;
+  // 주말·공휴일이면 직전 평일로 (보통 금요일)
+  for (let guard = 0; guard < 10 && isOffDay(data, d); guard++) d = addDays(d, -1);
+  return d;
+}
+export function nextPayday(data, today) {
+  let d = paydayDate(data, ymOf(today));
+  if (d < today) d = paydayDate(data, addMonths(`${ymOf(today)}-01`, 1).slice(0, 7));
+  return { date: d, d: diffDays(today, d), moved: d.slice(8) !== String(Number(data.payday) || 10).padStart(2, '0') };
+}
+
+// ---------- 재밌는 문구 (날짜마다 바뀜) ----------
+export function pick(arr, seed, salt = '') {
+  let h = 2166136261; for (const c of seed + salt) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+  return arr[Math.abs(h) % arr.length];
+}
+export const FUN = {
+  dailyTitle: [
+    (v) => `⚓ 전역 D-${v.left}`, (v) => `🛻 오늘도 무사히 운행 완료! D-${v.left}`, (v) => `🔥 ${v.served}일 버텼다, D-${v.left}`,
+    (v) => `📉 전역까지 ${v.left}일, 또 하루 줄었다`, (v) => `🍚 남은 짬밥 ${v.meals.toLocaleString()}끼`, (v) => `⏳ 복무율 ${v.pct}% 돌파 중`,
+  ],
+  dailyBody: [
+    (v) => `${v.rank} · 복무율 ${v.pct}% · 오늘 하루도 수고했어요`, (v) => `${v.weeks}주만 더 버티면 사회인! 오늘 저녁 뭐 먹었어요?`,
+    (v) => `복무율 ${v.pct}% — 지게차 아직 달리는 중 🚧`, (v) => `${v.rank} ${v.served}일째. 내일의 나에게 맡기고 오늘은 쉬어요`,
+    (v) => `전역 시계는 오늘도 정상 작동 중 ✅ (${v.pct}%)`, (v) => `오늘 하루 수고! 남은 건 ${v.left}일뿐`,
+  ],
+  paydayTitle: ['💸 오늘은 월급날! 어떤 거 하고 싶으세요?', '🎉 띵동~ 월급이 도착했어요!', '💰 통장이 웃는 날, 월급날이에요', '🤑 월급 들어왔다! 오늘 PX 플렉스?'],
+  paydayBody: ['냉동 털기? 적금 통장 보며 흐뭇해하기?', '이번 달 가계부도 잊지 말고 기록해요 🧾', '휴가 자금으로 모아둘까요, 오늘만 플렉스할까요?', '고생한 나에게 작은 선물 하나 어때요?'],
+  paydayEveTitle: ['⏰ 내일은 월급날!', '💸 D-1, 월급이 오고 있어요', '🛻 월급 수송 차량 출발했습니다'],
+  paydayEveBody: ['위시리스트 미리 정리해두세요', '오늘 밤은 설레서 잠 안 올지도?', '내일 PX 동선 미리 짜두기 📝'],
+};
+
+// ---------- 홈 화면 축하 팝업 ----------
+export function celebrations(data, today) {
+  const out = [], sv = service(data, today);
+  const add = (key, emoji, title, msg, action) => out.push({ key: `${today}:${key}`, emoji, title, msg, action });
+  for (const rk of RANKS.slice(1)) if (data.profile.promo?.[rk.key] === today) add('promo', '🎖️', `${rk.name} 진급을 축하합니다!`, `오늘부터 ${rk.name}! 이번 달 봉급은 ${won(data.pay[rk.key])}이에요.`, null);
+  const pd = paydayDate(data, ymOf(today));
+  if (pd === today && today <= data.profile.discharge) add('payday', '💸', pick(FUN.paydayTitle, today, 'pt'), `${won(data.pay[rankOn(data, today).key] || 0)} 입금 예정! ${pick(FUN.paydayBody, today, 'pb')}`, 'book');
+  for (const a of upcomingAnnivs(data, today).filter((x) => x.next.d === 0)) add('anniv-' + a.id, a.kind === '생일' ? '🎂' : '💝', `오늘은 ${a.name}!`, `${a.who ? a.who + '에게 ' : ''}축하 메시지 보내는 거 잊지 마세요${annivYears(a)}`, null);
+  if (sv.done && today === data.profile.discharge) add('done', '🎓', '전역을 축하합니다!', `${sv.total}일 동안 정말 수고 많으셨어요. 이제 사회로 출발!`, null);
+  else {
+    for (const p of [25, 50, 75]) if (addDays(data.profile.enlist, Math.ceil((sv.total * p) / 100)) === today) add('pct' + p, p === 50 ? '🛣️' : '🚛', `복무율 ${p}% 돌파!`, p === 50 ? '드디어 반환점! 이제 내리막길이에요.' : p === 75 ? '막바지! 끝이 보이기 시작해요.' : '4분의 1 완료! 순조로운 출발이에요.', null);
+    if (sv.served > 0 && sv.served % 100 === 0) add('served', '💯', `복무 ${sv.served}일째!`, '100일마다 찾아오는 작은 축하 🎉', null);
+    if ([100, 50, 30, 10, 1].includes(sv.left)) add('left', '⏳', sv.left === 1 ? '내일 전역!' : `전역 D-${sv.left}`, sv.left === 1 ? '마지막 밤이에요. 짐 싸셨나요?' : `이제 ${sv.left}일 남았어요!`, null);
+  }
+  for (const l of data.leaves || []) if (l.start === today) add('leave-' + l.id, '🧳', `오늘 ${l.kind} 출발!`, `${l.memo ? l.memo + ' · ' : ''}즐겁게 다녀오세요!`, 'leave');
   return out;
 }
