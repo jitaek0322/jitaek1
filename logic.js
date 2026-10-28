@@ -57,7 +57,7 @@ export function defaultData() {
     payday: 10,            // 봉급일 — 주말·공휴일이면 직전 평일
     holidays: [],          // 추가 휴일 'YYYY-MM-DD' (설·추석·대체공휴일 등)
     mileagePerDay: 10,     // 위로 마일리지 n점 = 위로휴가 1일
-    overnight: { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2 }, // 정기외박: 6주 주기 2박3일 (5~7주 유동)
+    overnight: { first: '2026-05-15', cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2 }, // 정기외박: 첫 외박 5/15, 6주 주기 2박3일 (5~7주 유동)
     drives: [],            // {id, date, vehicle, name, start, end, km, cargo, memo}
     fitness: { records: [], goals: { pushup: 0, situp: 0, run: 0 } }, // records: {id, date, pushup, situp, run(sec)}
     expenseCats: ['PX', '식비', '외출', '통신', '기타'],
@@ -163,20 +163,40 @@ export function leaveSummary(data, today = kstToday()) {
   if (on) rows.push(on);
   return rows;
 }
-// 정기외박을 휴가처럼 일수로 (2박3일 = 3일). 전역까지 남은 횟수는 주기로 자동 계산
+// 정기외박을 휴가처럼 일수로 (2박3일 = 3일). 첫 외박일부터 주기대로 전역 전까지 자동 계산
+export function overnightSchedule(data, today) {
+  const cfg = { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2, first: '', ...(data.overnight || {}) };
+  const rec = (data.leaves || []).flatMap(segsOf).filter((g) => g.kind === '정기외박').sort((a, b) => a.start.localeCompare(b.start));
+  const first = cfg.first || rec[0]?.start;
+  if (!first) return null;
+  const lastStart = addDays(data.profile.discharge, -cfg.nights); // 전역 전에 복귀해야 함
+  const cyc = cfg.cycleWeeks * 7, slots = [], used = new Set();
+  let cur = first, guard = 0;
+  while (cur <= lastStart && guard++ < 60) {
+    // 원래 일정표(첫 외박 + 6주 × n)는 고정. 근처(±3주)에 실제 기록이 있으면 그 차수를 그 날짜로 사용 (5주·7주 조정)
+    const r = rec.find((g, i) => !used.has(i) && Math.abs(diffDays(cur, g.start)) <= 21);
+    let slot;
+    if (r) { used.add(rec.indexOf(r)); slot = { start: r.start, end: r.end, recorded: true, seg: r, plan: cur }; }
+    else slot = { start: cur, end: addDays(cur, cfg.nights), recorded: false, plan: cur };
+    slot.status = slot.end < today ? 'done' : slot.start <= today ? 'now' : 'future';
+    slots.push(slot);
+    cur = addDays(cur, cyc); // 밀려도 다음 차수는 원래 일정표 날짜로
+  }
+  // 일정과 안 맞는 추가 기록도 사용으로 포함
+  rec.forEach((g, i) => { if (!used.has(i)) slots.push({ start: g.start, end: g.end, recorded: true, seg: g, extra: true, status: g.end < today ? 'done' : g.start <= today ? 'now' : 'future' }); });
+  slots.sort((a, b) => a.start.localeCompare(b.start));
+  return { cfg, first, slots };
+}
 export function overnightQuota(data, today) {
-  const cfg = { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2, ...(data.overnight || {}) };
-  const per = cfg.nights + 1;
-  const list = (data.leaves || []).flatMap(segsOf).filter((g) => g.kind === '정기외박').sort((a, b) => a.start.localeCompare(b.start));
-  const usedDays = list.reduce((s, g) => s + diffDays(g.start, g.end) + 1, 0);
-  const last = list[list.length - 1];
-  const ref = last ? last.start : today;
-  const lastStart = addDays(data.profile.discharge, -cfg.nights); // 전역 전에 끝나야 하는 마지막 출발일
-  let remain = 0;
-  if (last) { for (let d = addDays(ref, cfg.cycleWeeks * 7); d <= lastStart; d = addDays(d, cfg.cycleWeeks * 7)) remain++; }
-  else { for (let d = today; d <= lastStart; d = addDays(d, cfg.cycleWeeks * 7)) remain++; }
-  const leftDays = remain * per;
-  return { id: 'overnight', name: '정기외박', auto: true, base: 0, earned: 0, total: usedDays + leftDays, used: usedDays, left: leftDays, count: { used: list.length, remain, per } };
+  const sc = overnightSchedule(data, today);
+  if (!sc) return null;
+  const days = (x) => diffDays(x.start, x.end) + 1;
+  const total = sc.slots.reduce((s, x) => s + days(x), 0);
+  // 지난 차수 + 앞으로 잡아둔(기록한) 차수 = 사용
+  const usedSlots = sc.slots.filter((x) => x.status !== 'future' || x.recorded);
+  const usedDays = usedSlots.reduce((s, x) => s + days(x), 0);
+  return { id: 'overnight', name: '정기외박', auto: true, base: 0, earned: 0, total, used: usedDays, left: Math.max(0, total - usedDays),
+    count: { total: sc.slots.length, used: usedSlots.length, remain: sc.slots.length - usedSlots.length, per: sc.cfg.nights + 1 }, first: sc.first };
 }
 export function nextLeave(data, today) {
   const up = data.leaves.filter((l) => l.end >= today).sort((a, b) => a.start.localeCompare(b.start));
@@ -677,12 +697,20 @@ export function overnightList(data) {
   return (data.leaves || []).flatMap((l) => segsOf(l).map((g) => ({ ...g, trip: l }))).filter((g) => g.kind === '정기외박').sort((a, b) => a.start.localeCompare(b.start));
 }
 export function nextOvernight(data, today) {
-  const cfg = { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2, ...(data.overnight || {}) };
-  const list = overnightList(data);
-  const upcoming = list.find((g) => g.end >= today);
-  if (upcoming) return { planned: true, seg: upcoming, d: diffDays(today, upcoming.start), ongoing: upcoming.start <= today };
-  const last = list[list.length - 1];
-  if (!last) return null;
-  const target = addDays(last.start, cfg.cycleWeeks * 7), ws = addDays(last.start, cfg.minWeeks * 7), we = addDays(last.start, cfg.maxWeeks * 7);
-  return { planned: false, last: last.start, target, windowStart: ws, windowEnd: we, d: diffDays(today, target), weeksSince: Math.floor(diffDays(last.start, today) / 7), cfg };
+  const sc = overnightSchedule(data, today);
+  if (!sc) return null;
+  const cfg = sc.cfg;
+  const nowSlot = sc.slots.find((x) => x.status === 'now');
+  const upRec = sc.slots.find((x) => x.status !== 'done' && x.recorded);
+  if (nowSlot?.recorded || (upRec && (!nowSlot))) {
+    const g = nowSlot || upRec;
+    return { planned: true, seg: { ...g.seg, trip: (data.leaves || []).find((l) => segsOf(l).some((s) => s.start === g.start && s.kind === '정기외박')) || { kind: '정기외박' } }, d: diffDays(today, g.start), ongoing: g.start <= today };
+  }
+  const nx = sc.slots.find((x) => x.status !== 'done');
+  if (!nx) return null;
+  const prev = [...sc.slots].reverse().find((x) => x.start < nx.start);
+  // 가능 기간: 원래 일정 기준 5주차~7주차 (= 예정일 -1주 ~ +1주)
+  const base = addDays(nx.plan || nx.start, -cfg.cycleWeeks * 7);
+  return { planned: false, last: prev?.start || null, target: nx.start, windowStart: addDays(base, cfg.minWeeks * 7), windowEnd: addDays(base, cfg.maxWeeks * 7),
+    d: diffDays(today, nx.start), weeksSince: prev ? Math.floor(diffDays(prev.start, today) / 7) : 0, cfg, ongoing: nx.status === 'now' };
 }
