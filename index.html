@@ -1085,7 +1085,7 @@ function overnightNote(t) {
   let nx = '';
   if (no?.planned) nx = `${no.ongoing ? '외박 중 · 복귀 ' + L.dLabel(L.diffDays(today, no.seg.end)) : '다음 외박 ' + L.dLabel(no.d)} · ${L.fmtDate(no.seg.start, false).slice(3)}~${L.fmtDate(no.seg.end, false).slice(3)}`;
   else if (no) nx = `다음 외박 ${L.dLabel(no.d)} · ${L.fmtDate(no.target, false).slice(3)} 전후 (${L.fmtDate(no.windowStart, false).slice(3)}~${L.fmtDate(no.windowEnd, false).slice(3)})`;
-  return `<div class="note" style="margin-top:6px">🌙 ${cfg.cycleWeeks}주 주기 · ${cfg.nights}박${cfg.nights + 1}일 = ${c.per}일 · 사용 ${c.used}회 · 전역까지 약 ${c.remain}회 남음 (자동 계산) <button class="link" data-edit="etc" style="font-size:12px">주기 설정</button></div>
+  return `<div class="note" style="margin-top:6px">🌙 첫 외박 ${L.fmtDate(t.first, false)}부터 ${cfg.cycleWeeks}주마다 · ${cfg.nights}박${cfg.nights + 1}일 = ${c.per}일<br>전역까지 총 <b style="color:var(--text)">${c.total}회</b> · 다녀옴 ${c.used}회 · 남은 ${c.remain}회 <button class="link" data-edit="etc" style="font-size:12px">주기 설정</button></div>
     ${nx ? `<div class="onext">${nx}</div>` : '<div class="note">정기외박을 한 번 기록하면 다음 외박 시기를 알려드려요</div>'}`;
 }
 /* ============ 돈 (급여 + 가계부) ============ */
@@ -1433,11 +1433,12 @@ Object.assign(SHEETS, {
     openSheet(`<h3>기준 설정</h3><form>
       <div class="row">${field('봉급일 (매월)', inp('payday', S.payday, 'number', 'min="1" max="28" inputmode="numeric"'))}${field('위로휴가 1일 = 마일리지', inp('per', S.mileagePerDay, 'number', 'min="1" inputmode="numeric"'))}</div>
       <label class="f"><span>정기외박 주기</span></label>
+      ${field('첫 외박 출발일', inp('onfirst', S.overnight?.first || '', 'date'))}
       <div class="row">${field('기본 (주)', inp('onc', S.overnight?.cycleWeeks ?? 6, 'number', 'min="1" inputmode="numeric"'))}${field('빠르면 (주)', inp('onmin', S.overnight?.minWeeks ?? 5, 'number', 'min="1" inputmode="numeric"'))}${field('늦으면 (주)', inp('onmax', S.overnight?.maxWeeks ?? 7, 'number', 'min="1" inputmode="numeric"'))}${field('박 수', inp('onn', S.overnight?.nights ?? 2, 'number', 'min="1" inputmode="numeric"'))}</div>
       ${field('가계부 분류 (쉼표로 구분)', inp('cats', S.expenseCats.join(', ')))}
       ${field('추가 휴일 (월급날 계산용, 쉼표로 구분)', `<textarea class="inp" name="hol" rows="2" placeholder="예: 2027-02-08, 2027-09-15">${esc((S.holidays || []).join(', '))}</textarea>`)}
       <div class="note" style="margin-top:-4px">주말과 신정·삼일절·어린이날·현충일·광복절·개천절·한글날·성탄절은 자동으로 빠져요. 설·추석·대체공휴일만 넣으면 돼요.</div>${actions()}</form>`,
-    (f) => { S.payday = Math.min(28, Math.max(1, Number(f.payday) || 10)); S.mileagePerDay = Math.max(1, Number(f.per) || 10); { const c = Math.max(1, +f.onc || 6), mn = Math.max(1, +f.onmin || 5), mx = Math.max(1, +f.onmax || 7); S.overnight = { cycleWeeks: c, minWeeks: Math.min(mn, c), maxWeeks: Math.max(mx, c), nights: Math.max(1, +f.onn || 2) }; } S.holidays = [...new Set(f.hol.split(/[,\s]+/).map((x) => x.trim()).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort(); const c = f.cats.split(',').map((x) => x.trim()).filter(Boolean); if (c.length) S.expenseCats = [...new Set(c)]; save(); });
+    (f) => { S.payday = Math.min(28, Math.max(1, Number(f.payday) || 10)); S.mileagePerDay = Math.max(1, Number(f.per) || 10); { const c = Math.max(1, +f.onc || 6), mn = Math.max(1, +f.onmin || 5), mx = Math.max(1, +f.onmax || 7); S.overnight = { first: f.onfirst || '', cycleWeeks: c, minWeeks: Math.min(mn, c), maxWeeks: Math.max(mx, c), nights: Math.max(1, +f.onn || 2) }; } S.holidays = [...new Set(f.hol.split(/[,\s]+/).map((x) => x.trim()).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort(); const c = f.cats.split(',').map((x) => x.trim()).filter(Boolean); if (c.length) S.expenseCats = [...new Set(c)]; save(); });
   },
 });
 /* ---- 출타 구간 편집기 ---- */
