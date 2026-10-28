@@ -395,6 +395,7 @@ textarea.inp{line-height:1.5}
 .onbar span{position:absolute;top:-4px;width:2px;height:16px;background:var(--dim);border-radius:1px}
 .onbar span.t{background:var(--gold)}
 #view.anim .onbar i{transform-origin:left;animation:grow 1s .25s cubic-bezier(.2,.8,.2,1) both}
+.onext{display:inline-block;margin-top:6px;font-size:12.5px;font-weight:600;color:var(--sea2);background:rgba(111,179,240,.1);border:1px solid rgba(111,179,240,.25);border-radius:99px;padding:4px 10px}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 </style>
 <script src="firebase-config.js"></script>
@@ -777,7 +778,7 @@ function goalRow(g) {
 }
 function viewHome() {
   const sv = L.service(S, today), r = L.rankOn(S, today), np = L.nextPromotion(S, today), nl = L.nextLeave(S, today);
-  const pay = L.payThisMonth(S, today), ls = L.leaveSummary(S), leftLeave = ls.reduce((a, t) => a + t.left, 0), totalLeave = ls.reduce((a, t) => a + (t.total || 0), 0);
+  const pay = L.payThisMonth(S, today), ls = L.leaveSummary(S, today), leftLeave = ls.reduce((a, t) => a + t.left, 0), totalLeave = ls.reduce((a, t) => a + (t.total || 0), 0);
   const tomorrow = L.addDays(today, 1);
   const evs = S.events.filter((e) => e.date === today || e.date === tomorrow).sort((a, b) => (a.date + (a.time || '99')).localeCompare(b.date + (b.time || '99')));
   const pushOn = !!meta.pushToken;
@@ -807,7 +808,7 @@ function viewHome() {
 
 /* ============ 휴가 ============ */
 function viewLeave() {
-  const ls = L.leaveSummary(S);
+  const ls = L.leaveSummary(S, today);
   const up = S.leaves.filter((l) => l.end >= today).sort((a, b) => a.start.localeCompare(b.start));
   const past = S.leaves.filter((l) => l.end < today).sort((a, b) => b.start.localeCompare(a.start));
   const nameOf = (id) => S.leaveTypes.find((t) => t.id === id)?.name || '';
@@ -816,11 +817,11 @@ function viewLeave() {
     <small>${L.fmtDate(l.start)}${l.end !== l.start ? ' ~ ' + L.fmtDate(l.end) : ''}${l.start > today ? ` · ${L.dLabel(L.diffDays(today, l.start))}` : l.end >= today ? ' · 출타 중' : ''}</small></div>
     <button class="x" data-del-leave="${l.id}" aria-label="삭제">×</button></div>`;
   return `
-  <h2 style="margin-top:4px">휴가 현황 <button class="link" data-edit="leaveTypes">일수 편집</button></h2>
+  <h2 style="margin-top:4px">휴가 · 외박 현황 <button class="link" data-edit="leaveTypes">일수 편집</button></h2>
   <div class="card">${ls.map((t) => `<div style="margin:4px 0 14px">
       <div style="display:flex;justify-content:space-between;margin-bottom:6px"><b>${esc(t.name)}</b><span class="sub"><b class="gold">${t.left}</b> / ${t.total || 0}일 남음</span></div>
       <div class="bar g"><i style="width:${t.total ? Math.min(100, t.used / t.total * 100) : 0}%"></i></div></div>`).join('')}
-    ${ls.every((t) => !t.total) ? '<div class="note">⚓ 부여받은 휴가 일수를 "일수 편집"에서 입력하세요. 포상·위로휴가는 받을 때마다 늘리면 돼요.</div>' : ''}
+    ${ls.filter((t) => !t.auto).every((t) => !t.total) ? '<div class="note">⚓ 부여받은 휴가 일수를 "일수 편집"에서 입력하세요. 포상·위로휴가는 받을 때마다 늘리면 돼요.</div>' : ''}
   </div>
   <button class="btn pri full" style="margin-top:12px" data-add="leave">+ 휴가 · 외박 · 외출 등록</button>
   <h2>예정</h2>
@@ -1045,11 +1046,10 @@ function homeExtras() {
 
 /* ============ 출타 (휴가 + 외출) ============ */
 function viewLeave2() {
-  const ls = L.leaveSummary(S), ms = L.mileageSummary(S);
+  const ls = L.leaveSummary(S, today), ms = L.mileageSummary(S);
   const ym = today.slice(0, 7);
   const allSegs = S.leaves.flatMap(L.segsOf);
-  const outs = ['정기외박', ...L.OUTING_KINDS].map((k) => ({ k, month: allSegs.filter((g) => g.kind === k && g.start.slice(0, 7) === ym).length, all: allSegs.filter((g) => g.kind === k).length }));
-  const no = L.nextOvernight(S, today);
+  const outs = L.OUTING_KINDS.map((k) => ({ k, month: allSegs.filter((g) => g.kind === k && g.start.slice(0, 7) === ym).length, all: allSegs.filter((g) => g.kind === k).length }));
   const up = S.leaves.filter((l) => l.end >= today).sort((a, b) => a.start.localeCompare(b.start));
   const past = S.leaves.filter((l) => l.end < today).sort((a, b) => b.start.localeCompare(a.start));
   const nameOf = (id) => S.leaveTypes.find((t) => t.id === id)?.name || '';
@@ -1063,22 +1063,16 @@ function viewLeave2() {
     <span class="chev">›</span></div>`;
   };
   return `
-  <h2 style="margin-top:4px">휴가 현황 <button class="link" data-edit="leaveTypes">일수 편집</button></h2>
+  <h2 style="margin-top:4px">휴가 · 외박 현황 <button class="link" data-edit="leaveTypes">일수 편집</button></h2>
   <div class="card">${ls.map((t) => `<div style="margin:4px 0 14px">
       <div style="display:flex;justify-content:space-between;margin-bottom:6px"><b>${esc(t.name)}</b><span class="sub"><b class="gold">${t.left}</b> / ${t.total}일 남음</span></div>
       <div class="bar g"><i style="width:${t.total ? Math.min(100, (t.used / t.total) * 100) : 0}%"></i></div>
-      ${t.earned ? `<div class="note" style="margin-top:6px">부여 ${t.base}일 + 주말근무 마일리지 ${t.earned}일 (다음 1일까지 ${n1(ms.toNext)}점)</div>` : ''}</div>`).join('')}
-    ${ls.every((t) => !t.total) ? '<div class="note">부여받은 휴가 일수를 "일수 편집"에서 입력하세요. 위로휴가는 주말근무 마일리지 10점마다 1일씩 자동으로 더해져요.</div>' : ''}
+      ${t.earned ? `<div class="note" style="margin-top:6px">부여 ${t.base}일 + 주말근무 마일리지 ${t.earned}일 (다음 1일까지 ${n1(ms.toNext)}점)</div>` : ''}
+      ${t.auto ? overnightNote(t) : ''}</div>`).join('')}
+    ${ls.filter((t) => !t.auto).every((t) => !t.total) ? '<div class="note">부여받은 휴가 일수를 "일수 편집"에서 입력하세요. 위로휴가는 주말근무 마일리지 10점마다 1일씩 자동으로 더해져요.</div>' : ''}
   </div>
-  <h2>정기외박 <span class="hint">${S.overnight?.cycleWeeks || 6}주 주기 · ${S.overnight?.nights ?? 2}박${(S.overnight?.nights ?? 2) + 1}일</span> <button class="link" data-edit="etc">주기 설정</button></h2>
-  <div class="card on-card">${!no ? '<div class="empty" style="padding:4px 0">정기외박을 한 번 기록하면 다음 외박 시기를 계산해드려요</div>'
-    : no.planned ? `<div class="onrow"><span class="onico">🌙</span><div style="flex:1"><div class="sub">${no.ongoing ? '외박 중' : '다음 정기외박'}</div><b class="onv">${no.ongoing ? '복귀 ' + L.dLabel(L.diffDays(today, no.seg.end)) : L.dLabel(no.d)}</b><div class="note" style="margin:2px 0 0">${L.fmtDate(no.seg.start)} ~ ${L.fmtDate(no.seg.end)}${no.seg.trip.kind === '연계' ? ` · ${esc(L.tripLabel(S, no.seg.trip))}` : ''}</div></div></div>`
-    : `<div class="onrow"><span class="onico">🌙</span><div style="flex:1"><div class="sub">다음 정기외박 예정 (${no.cfg.cycleWeeks}주차)</div><b class="onv">${L.dLabel(no.d)}</b><div class="note" style="margin:2px 0 0">${L.fmtDate(no.target)} 전후 · 마지막 외박 후 ${no.weeksSince}주째</div></div></div>
-      <div class="onbar"><i style="left:0;width:${Math.min(100, (L.diffDays(no.last, today) / (no.cfg.maxWeeks * 7)) * 100)}%"></i><span style="left:${(no.cfg.minWeeks / no.cfg.maxWeeks) * 100}%"></span><span style="left:${(no.cfg.cycleWeeks / no.cfg.maxWeeks) * 100}%" class="t"></span></div>
-      <div class="vlab" style="margin-top:4px"><span>${L.fmtDate(no.last, false).slice(3)} 외박</span><span>${no.cfg.minWeeks}주 ${L.fmtDate(no.windowStart, false).slice(3)}</span><span>${no.cfg.maxWeeks}주 ${L.fmtDate(no.windowEnd, false).slice(3)}</span></div>`}
-  </div>
-  <h2>외박 · 외출 횟수</h2>
-  <div class="grid2x2">${outs.map((o) => `<div class="stat"><div class="k">${o.k}</div><div class="v">${o.month}<small style="font-size:13px">회</small></div><div class="s">이번 달 · 누적 ${o.all}회</div></div>`).join('')}</div>
+  <h2>외출 횟수</h2>
+  <div class="grid3">${outs.map((o) => `<div class="stat"><div class="k">${o.k}</div><div class="v">${o.month}<small style="font-size:13px">회</small></div><div class="s">이번 달 · 누적 ${o.all}회</div></div>`).join('')}</div>
   <button class="btn pri full" style="margin-top:12px" data-add="leave">+ 휴가 · 외박 · 외출 등록</button>
   <h2>예정 <span class="hint">눌러서 출타 플래너 열기</span></h2>
   <div class="card"><div class="list">${up.length ? up.map(row).join('') : empty('예정된 출타가 없어요')}</div></div>
@@ -1086,6 +1080,14 @@ function viewLeave2() {
   <div class="card"><div class="list">${past.length ? past.map(row).join('') : empty('아직 기록이 없어요')}</div></div>`;
 }
 
+function overnightNote(t) {
+  const no = L.nextOvernight(S, today), c = t.count, cfg = { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2, ...(S.overnight || {}) };
+  let nx = '';
+  if (no?.planned) nx = `${no.ongoing ? '외박 중 · 복귀 ' + L.dLabel(L.diffDays(today, no.seg.end)) : '다음 외박 ' + L.dLabel(no.d)} · ${L.fmtDate(no.seg.start, false).slice(3)}~${L.fmtDate(no.seg.end, false).slice(3)}`;
+  else if (no) nx = `다음 외박 ${L.dLabel(no.d)} · ${L.fmtDate(no.target, false).slice(3)} 전후 (${L.fmtDate(no.windowStart, false).slice(3)}~${L.fmtDate(no.windowEnd, false).slice(3)})`;
+  return `<div class="note" style="margin-top:6px">🌙 ${cfg.cycleWeeks}주 주기 · ${cfg.nights}박${cfg.nights + 1}일 = ${c.per}일 · 사용 ${c.used}회 · 전역까지 약 ${c.remain}회 남음 (자동 계산) <button class="link" data-edit="etc" style="font-size:12px">주기 설정</button></div>
+    ${nx ? `<div class="onext">${nx}</div>` : '<div class="note">정기외박을 한 번 기록하면 다음 외박 시기를 알려드려요</div>'}`;
+}
 /* ============ 돈 (급여 + 가계부) ============ */
 function viewMoneyTab() {
   return segBar('pay', [['salary', '급여 · 적금'], ['book', '가계부']]) + (SEG.pay === 'salary' ? viewPay() : viewBook());
