@@ -57,6 +57,7 @@ export function defaultData() {
     payday: 10,            // 봉급일 — 주말·공휴일이면 직전 평일
     holidays: [],          // 추가 휴일 'YYYY-MM-DD' (설·추석·대체공휴일 등)
     mileagePerDay: 10,     // 위로 마일리지 n점 = 위로휴가 1일
+    overnight: { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2 }, // 정기외박: 6주 주기 2박3일 (5~7주 유동)
     drives: [],            // {id, date, vehicle, name, start, end, km, cargo, memo}
     fitness: { records: [], goals: { pushup: 0, situp: 0, run: 0 } }, // records: {id, date, pushup, situp, run(sec)}
     expenseCats: ['PX', '식비', '외출', '통신', '기타'],
@@ -115,14 +116,45 @@ export function nextPromotion(data, today) {
 }
 
 // ---------- 휴가 ----------
+// 출타 1건 = 구간(segments) 여러 개 (예: 정기외박 + 연가). 예전 단일 기록도 구간 1개로 취급
+export function segsOf(l) {
+  return l.segments?.length ? l.segments : [{ kind: l.kind, typeId: l.typeId, start: l.start, end: l.end, days: l.days }];
+}
+export function segDays(seg) {
+  if (seg.kind !== '휴가') return 0;
+  if (typeof seg.days === 'number' && seg.days > 0) return seg.days;
+  return diffDays(seg.start, seg.end) + 1;
+}
+export function segName(data, seg) {
+  if (seg.kind === '휴가') return data.leaveTypes.find((t) => t.id === seg.typeId)?.name || '휴가';
+  return seg.kind;
+}
+export function tripLabel(data, l) {
+  const segs = segsOf(l);
+  return segs.map((g) => (g.kind === '휴가' ? `${segName(data, g)} ${segDays(g)}일` : g.kind === '정기외박' ? `외박 ${diffDays(g.start, g.end)}박` : g.kind)).join(' + ');
+}
+export function tripSpan(l) { // 총 n박 n+1일
+  const days = diffDays(l.start, l.end) + 1;
+  return isOuting(l.kind) ? '당일' : `${days - 1}박 ${days}일`;
+}
+// 구간들로 출타 전체의 시작·끝·종류를 정리
+export function normalizeTrip(l) {
+  const segs = segsOf(l).slice().sort((a, b) => a.start.localeCompare(b.start));
+  l.segments = segs;
+  l.start = segs[0].start; l.end = segs.reduce((m, g) => (g.end > m ? g.end : m), segs[0].end);
+  l.kind = segs.length > 1 ? '연계' : segs[0].kind; l.typeId = segs.length > 1 ? '' : segs[0].typeId || '';
+  delete l.days;
+  return l;
+}
 export function leaveDays(l) {
   if (isOuting(l.kind)) return 0;
+  if (l.segments?.length) return diffDays(l.start, l.end) + 1;
   if (typeof l.days === 'number' && l.days > 0) return l.days;
   return diffDays(l.start, l.end) + 1;
 }
 export function leaveSummary(data) {
   return data.leaveTypes.map((t) => {
-    const used = data.leaves.filter((l) => l.typeId === t.id && l.kind === '휴가').reduce((s, l) => s + leaveDays(l), 0);
+    const used = data.leaves.flatMap(segsOf).filter((g) => g.kind === '휴가' && g.typeId === t.id).reduce((s, g) => s + segDays(g), 0);
     const earned = t.id === 'comfort' ? mileageSummary(data).earnedDays : 0; // 주말근무 마일리지 자동 적립
     const total = (t.total || 0) + earned;
     return { ...t, base: t.total || 0, earned, total, used, left: Math.max(0, total - used) };
@@ -184,7 +216,7 @@ export function widgetSummary(data, today) {
   const ev = data.events.filter((e) => e.date >= today).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')))[0];
   return {
     enlist: data.profile.enlist, discharge: data.profile.discharge, promo: data.profile.promo,
-    nextLeave: nl ? { title: nl.leave.kind + (nl.leave.memo ? ` · ${nl.leave.memo}` : ''), start: nl.leave.start, end: nl.leave.end } : null,
+    nextLeave: nl ? { title: tripLabel(data, nl.leave) + (nl.leave.memo ? ` · ${nl.leave.memo}` : ''), start: nl.leave.start, end: nl.leave.end } : null,
     nextEvent: ev ? { title: ev.title, date: ev.date, time: ev.time || '' } : null,
     nextPromo: np ? { name: np.rank.name, date: np.date } : null,
     pct: Number(sv.pct.toFixed(2)), updated: today, theme: data.widgetTheme || 'forklift',
@@ -233,9 +265,9 @@ export function buildNotifications(data, today, nowTime = '18:00') {
   if (on.leave) {
     for (const l of data.leaves) {
       const d = diffDays(today, l.start);
-      const label = l.kind + (l.memo ? ` (${l.memo})` : '');
+      const label = (l.kind === '연계' ? '연계 출타' : l.kind === '휴가' ? segName(data, segsOf(l)[0]) : l.kind) + (l.memo ? ` (${l.memo})` : '');
       if (d === 3) out.push({ key: 'leave', title: `🧳 ${label} D-3`, body: `${fmtDate(l.start)} 출발. 출타 신청·짐 챙기기 확인!` });
-      if (d === 1) out.push({ key: 'leave', title: `🧳 내일 ${label} 출발!`, body: isOuting(l.kind) ? `${fmtDate(l.start)} ${l.kind}` : `${fmtDate(l.start)} ~ ${fmtDate(l.end)} · ${leaveDays(l)}일` });
+      if (d === 1) out.push({ key: 'leave', title: `🧳 내일 ${label} 출발!`, body: isOuting(l.kind) ? `${fmtDate(l.start)} ${l.kind}` : `${fmtDate(l.start)} ~ ${fmtDate(l.end)} · ${tripSpan(l)}${l.kind === '연계' ? ` (${tripLabel(data, l)})` : ''}` });
       if (!isOuting(l.kind) && diffDays(today, l.end) === 0 && l.start !== l.end) out.push({ key: 'leave', title: '🏠 오늘 복귀일이에요', body: `${label} 복귀 시간 확인하세요.` });
     }
   }
@@ -520,7 +552,9 @@ export function monthReport(data, ym, today) {
     mood: moods.length ? round1(moods.reduce((a, b) => a + b, 0) / moods.length) : null, diaryN: moods.length,
     merit: mer, weekend: { days: ww.length, hours: round1(ww.reduce((s, d) => s + d.capped, 0)), comfort: round1(ww.reduce((s, d) => s + d.comfort, 0)) },
     fit: fitRecs[fitRecs.length - 1] || null, goalsDone,
-    leaveDays: outs.filter((l) => !isOuting(l.kind)).reduce((s, l) => s + leaveDays(l), 0), outings: outs.filter((l) => isOuting(l.kind)).length,
+    leaveDays: (data.leaves || []).flatMap(segsOf).filter((g) => g.kind === '휴가' && ymOf(g.start) === ym).reduce((s, g) => s + segDays(g), 0),
+    outings: (data.leaves || []).flatMap(segsOf).filter((g) => isOuting(g.kind) && ymOf(g.start) === ym).length,
+    overnights: (data.leaves || []).flatMap(segsOf).filter((g) => g.kind === '정기외박' && ymOf(g.start) === ym).length,
     pctEnd: service(data, endDay).pct,
   };
 }
@@ -539,6 +573,10 @@ function extraNotifications(data, today, nowTime, out) {
   if (on.report && today.slice(8) === '01') {
     const r = monthReport(data, prevYM(ymOf(today)), today);
     out.push({ key: 'report', title: `📊 ${Number(r.ym.slice(5))}월 리포트가 나왔어요`, body: `운행 ${r.drives.hours}시간 · 지출 ${won(r.money.spent)} · 양호 ${r.merit.good}점${r.mood ? ` · 평균 기분 ${r.mood}` : ''}` });
+  }
+  if (on.leave) {
+    const no = nextOvernight(data, today);
+    if (no && !no.planned && no.windowStart === today) out.push({ key: 'leave', title: '🌙 정기외박 시기가 다가왔어요', body: `마지막 외박 후 ${data.overnight?.minWeeks || 5}주째! 예정일은 ${fmtDate(no.target)} 전후 (늦어도 ${fmtDate(no.windowEnd)})` });
   }
   if (on.payday) {
     const pdThis = paydayDate(data, ymOf(today)), pdNext = paydayDate(data, addMonths(`${ymOf(today)}-01`, 1).slice(0, 7));
@@ -612,6 +650,21 @@ export function celebrations(data, today) {
     if (sv.served > 0 && sv.served % 100 === 0) add('served', '💯', `복무 ${sv.served}일째!`, '100일마다 찾아오는 작은 축하 🎉', null);
     if ([100, 50, 30, 10, 1].includes(sv.left)) add('left', '⏳', sv.left === 1 ? '내일 전역!' : `전역 D-${sv.left}`, sv.left === 1 ? '마지막 밤이에요. 짐 싸셨나요?' : `이제 ${sv.left}일 남았어요!`, null);
   }
-  for (const l of data.leaves || []) if (l.start === today) add('leave-' + l.id, '🧳', `오늘 ${l.kind} 출발!`, `${l.memo ? l.memo + ' · ' : ''}즐겁게 다녀오세요!`, 'leave');
+  for (const l of data.leaves || []) if (l.start === today) add('leave-' + l.id, '🧳', `오늘 ${l.kind === '연계' ? '출타' : l.kind === '휴가' ? segName(data, segsOf(l)[0]) : l.kind} 출발!`, `${l.memo ? l.memo + ' · ' : ''}즐겁게 다녀오세요!`, 'leave');
   return out;
+}
+
+// ---------- 정기외박 주기 ----------
+export function overnightList(data) {
+  return (data.leaves || []).flatMap((l) => segsOf(l).map((g) => ({ ...g, trip: l }))).filter((g) => g.kind === '정기외박').sort((a, b) => a.start.localeCompare(b.start));
+}
+export function nextOvernight(data, today) {
+  const cfg = { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2, ...(data.overnight || {}) };
+  const list = overnightList(data);
+  const upcoming = list.find((g) => g.end >= today);
+  if (upcoming) return { planned: true, seg: upcoming, d: diffDays(today, upcoming.start), ongoing: upcoming.start <= today };
+  const last = list[list.length - 1];
+  if (!last) return null;
+  const target = addDays(last.start, cfg.cycleWeeks * 7), ws = addDays(last.start, cfg.minWeeks * 7), we = addDays(last.start, cfg.maxWeeks * 7);
+  return { planned: false, last: last.start, target, windowStart: ws, windowEnd: we, d: diffDays(today, target), weeksSince: Math.floor(diffDays(last.start, today) / 7), cfg };
 }
