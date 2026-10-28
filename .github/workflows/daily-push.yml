@@ -1,0 +1,39 @@
+name: 매일 18시 알림
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # UTC 09:00 = 한국 18:00
+  workflow_dispatch:       # Actions 탭에서 수동 실행 (테스트용)
+    inputs:
+      test:
+        description: '테스트 알림도 함께 보내기'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # GitHub는 60일 동안 커밋이 없으면 예약 실행을 멈춰요 → 50일마다 빈 커밋으로 깨워둠
+      - name: 예약 실행 유지
+        run: |
+          last=$(git log -1 --format=%ct); now=$(date +%s)
+          if [ $(( (now - last) / 86400 )) -ge 50 ]; then
+            git config user.name "navylog-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive ⚓"
+            git push
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --omit=dev --no-audit --no-fund
+      - run: node notifier/send.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          APP_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          SEND_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.test }}
