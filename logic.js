@@ -152,13 +152,31 @@ export function leaveDays(l) {
   if (typeof l.days === 'number' && l.days > 0) return l.days;
   return diffDays(l.start, l.end) + 1;
 }
-export function leaveSummary(data) {
-  return data.leaveTypes.map((t) => {
+export function leaveSummary(data, today = kstToday()) {
+  const rows = data.leaveTypes.map((t) => {
     const used = data.leaves.flatMap(segsOf).filter((g) => g.kind === '휴가' && g.typeId === t.id).reduce((s, g) => s + segDays(g), 0);
     const earned = t.id === 'comfort' ? mileageSummary(data).earnedDays : 0; // 주말근무 마일리지 자동 적립
     const total = (t.total || 0) + earned;
     return { ...t, base: t.total || 0, earned, total, used, left: Math.max(0, total - used) };
   });
+  const on = overnightQuota(data, today);
+  if (on) rows.push(on);
+  return rows;
+}
+// 정기외박을 휴가처럼 일수로 (2박3일 = 3일). 전역까지 남은 횟수는 주기로 자동 계산
+export function overnightQuota(data, today) {
+  const cfg = { cycleWeeks: 6, minWeeks: 5, maxWeeks: 7, nights: 2, ...(data.overnight || {}) };
+  const per = cfg.nights + 1;
+  const list = (data.leaves || []).flatMap(segsOf).filter((g) => g.kind === '정기외박').sort((a, b) => a.start.localeCompare(b.start));
+  const usedDays = list.reduce((s, g) => s + diffDays(g.start, g.end) + 1, 0);
+  const last = list[list.length - 1];
+  const ref = last ? last.start : today;
+  const lastStart = addDays(data.profile.discharge, -cfg.nights); // 전역 전에 끝나야 하는 마지막 출발일
+  let remain = 0;
+  if (last) { for (let d = addDays(ref, cfg.cycleWeeks * 7); d <= lastStart; d = addDays(d, cfg.cycleWeeks * 7)) remain++; }
+  else { for (let d = today; d <= lastStart; d = addDays(d, cfg.cycleWeeks * 7)) remain++; }
+  const leftDays = remain * per;
+  return { id: 'overnight', name: '정기외박', auto: true, base: 0, earned: 0, total: usedDays + leftDays, used: usedDays, left: leftDays, count: { used: list.length, remain, per } };
 }
 export function nextLeave(data, today) {
   const up = data.leaves.filter((l) => l.end >= today).sort((a, b) => a.start.localeCompare(b.start));
