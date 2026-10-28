@@ -1,0 +1,17 @@
+{
+  "name": "군생활 관리",
+  "short_name": "군생활",
+  "description": "해군 복무 D-day · 휴가 · 급여 · 일정 · 목표 관리",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#071526",
+  "theme_color": "#0B1F3A",
+  "lang": "ko",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "navy-log",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "notify": "node notifier/send.js",
+    "notify:dry": "node notifier/send.js --dry"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}
